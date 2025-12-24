@@ -1,14 +1,19 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { useState } from "react";
 import UploadPage from "./pages/UploadPage";
 import ResultPage from "./pages/ResultPage";
 
+
 export default function App() {
+  const [file, setFile] = useState(null);
+
+
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<UploadPage />} />
-        <Route path="/result" element={<ResultPage />} />
-      </Routes>
-    </BrowserRouter>
+    <>
+      {!file ? (
+        <UploadPage onUploaded={setFile} />
+      ) : (
+        <ResultPage file={file} onBack={() => setFile(null)} />
+      )}
+    </>
   );
 }

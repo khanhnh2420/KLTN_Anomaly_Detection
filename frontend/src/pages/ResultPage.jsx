@@ -1,33 +1,34 @@
 import { useEffect, useState } from "react";
-import { useLocation } from "react-router-dom";
-import { scoreCsv } from "../services/api";
+import { scoreCSV } from "../services/api";
 
-export default function ResultPage() {
-  const { state } = useLocation();
-  const file = state?.file;
 
-  const [rows, setRows] = useState([]);
-  const [meta, setMeta] = useState({});
+export default function ResultPage({ file, onBack }) {
+  const [data, setData] = useState([]);
+  const [meta, setMeta] = useState(null);
   const [page, setPage] = useState(1);
 
-  const PAGE_SIZE = 20;
 
   useEffect(() => {
-    if (!file) return;
+    load();
+  }, [page]);
 
-    scoreCsv(file, page, PAGE_SIZE).then(res => {
-      setRows(res.data);
-      setMeta(res.meta);
-    });
-  }, [file, page]);
 
-  if (!file) return <p>No file uploaded</p>;
+  const load = async () => {
+    const res = await scoreCSV(file, page, 20);
+    setData(res.data);
+    setMeta(res.meta);
+  };
+
 
   return (
-    <div style={{ padding: 30 }}>
-      <h2>Detection Result</h2>
+    <div style={{ padding: 40 }}>
+      <h2>Anomaly Results</h2>
 
-      <table border="1" cellPadding="6">
+
+      <button onClick={onBack}>⬅ Back</button>
+
+
+      <table border="1" cellPadding="8" style={{ marginTop: 20 }}>
         <thead>
           <tr>
             <th>BELNR</th>
@@ -35,30 +36,35 @@ export default function ResultPage() {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => (
+          {data.map((row, i) => (
             <tr key={i}>
-              <td>{r.BELNR}</td>
-              <td>{r.anomaly_scored.toFixed(2)}</td>
+              <td>{row.BELNR}</td>
+              <td>{row.anomaly_scored.toFixed(4)}</td>
             </tr>
           ))}
         </tbody>
       </table>
 
-      <br />
-      <button disabled={page === 1} onClick={() => setPage(p => p - 1)}>
-        Prev
-      </button>
 
-      <span style={{ margin: "0 10px" }}>
-        Page {meta.page} / {meta.total_pages}
-      </span>
-
-      <button
-        disabled={page === meta.total_pages}
-        onClick={() => setPage(p => p + 1)}
-      >
-        Next
-      </button>
+      {meta && (
+        <div style={{ marginTop: 20 }}>
+          <button
+            disabled={page === 1}
+            onClick={() => setPage(page - 1)}
+          >
+            Prev
+          </button>
+          <span style={{ margin: "0 10px" }}>
+            Page {meta.page} / {meta.total_pages}
+          </span>
+          <button
+            disabled={page === meta.total_pages}
+            onClick={() => setPage(page + 1)}
+          >
+            Next
+          </button>
+        </div>
+      )}
     </div>
   );
 }
