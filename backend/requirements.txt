@@ -1,8 +1,7 @@
 fastapi
-uvicorn[standard]
+joblib
 numpy
 pandas
-joblib
 scikit-learn
-python-multipart  # để upload file
-openpyxl           # nếu cần đọc file Excel
+uvicorn[standard]
+python-multipart

@@ -1,12 +1,24 @@
-FROM python:3.11.9-slim
+# syntax=docker/dockerfile:1.7
+FROM python:3.10-slim
 
 WORKDIR /app
 
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+# SSL cert (bắt buộc)
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    && update-ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY ./app ./app
+COPY requirements.txt .
+
+RUN python -m pip install --upgrade pip && \
+    pip install --no-cache-dir \
+    --timeout=1000 \
+    -i https://pypi.org/simple \
+    -r requirements.txt
+
+COPY src/ ./src/
+COPY model/ ./model/
 
 EXPOSE 8000
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
