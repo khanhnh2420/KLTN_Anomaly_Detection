@@ -17,12 +17,14 @@ from pydantic import BaseModel
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_PATH = ROOT / "model" / "svd_lof.joblib"
 
+
 # =========================
 # Request schema
 # =========================
 class ScoreRequest(BaseModel):
     records: List[Dict[str, Any]]
     top_k: Optional[int] = 10
+
 
 # =========================
 # Lifespan: load model
@@ -42,6 +44,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
+
 # =========================
 # App
 # =========================
@@ -56,11 +59,15 @@ app = FastAPI(
 # =========================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # khi production có thể giới hạn domain
+    allow_origins=[
+        "http://localhost:3000",
+        "https://sap-anomaly-fe.onrender.com",
+    ],  # khi production có thể giới hạn domain
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # =========================
 # Health check
@@ -68,6 +75,7 @@ app.add_middleware(
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
 
 # =========================
 # JSON scoring
@@ -98,6 +106,7 @@ def score(req: ScoreRequest):
         "top_scores": [float(scores[i]) for i in top_idx],
     }
 
+
 # =========================
 # CSV upload + pagination
 # =========================
@@ -107,37 +116,33 @@ async def score_csv(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=5, le=100),
 ):
-    # 1. Read CSV
     content = await file.read()
-    df = pd.read_csv(io.BytesIO(content))
 
-    if "BELNR" not in df.columns:
-        raise HTTPException(
-            status_code=400,
-            detail="CSV must contain column 'BELNR'",
-        )
+    USE_COLS = ["BELNR", "DMBTR", "WRBTR"]
+    FEATURE_COLS = ["DMBTR", "WRBTR"]
 
-    # 2. Ensure numeric
-    for c in ["DMBTR", "WRBTR"]:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-
-    # 3. Feature + scoring
-    try:
-        Z = app.state.feature_pipe.transform(df)
-        scores = -app.state.lof.score_samples(Z)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Scoring failed: {e}")
-
-    df["anomaly_scored"] = scores.astype(float)
-
-    # 4. Sort
-    df_sorted = (
-        df.sort_values("anomaly_scored", ascending=False)
-        .reset_index(drop=True)
+    # 1. Read CSV (nhẹ nhất có thể)
+    df = pd.read_csv(
+        io.BytesIO(content),
+        usecols=USE_COLS,
+        dtype={
+            "BELNR": "string",
+            "DMBTR": "float32",
+            "WRBTR": "float32",
+        },
     )
 
-    total_rows = len(df_sorted)
+    # 2. Feature
+    df_model = df[FEATURE_COLS]
+    Z = app.state.feature_pipe.transform(df_model)
+    Z = Z.astype("float32", copy=False)
+
+    # 3. Batched LOF scoring
+    scores = score_lof_batched(app.state.lof, Z)
+    df["anomaly_scored"] = scores
+
+    # 4. Pagination (không sort full)
+    total_rows = len(df)
     total_pages = max(1, math.ceil(total_rows / page_size))
 
     if page > total_pages:
@@ -146,12 +151,14 @@ async def score_csv(
             detail=f"page ({page}) exceeds total_pages ({total_pages})",
         )
 
-    # 5. Pagination
-    start = (page - 1) * page_size
-    end = start + page_size
-    df_page = df_sorted.iloc[start:end][["BELNR", "anomaly_scored"]]
+    k = page * page_size
+    topk = df.nlargest(k, "anomaly_scored")
 
-    # 6. Response
+    start = (page - 1) * page_size
+    end = page * page_size
+
+    df_page = topk.iloc[start:end][["BELNR", "anomaly_scored"]]
+
     return {
         "meta": {
             "page": page,
