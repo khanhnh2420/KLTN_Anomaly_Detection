@@ -3,7 +3,7 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# SSL cert (bắt buộc)
+# SSL cert
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     && update-ca-certificates \
@@ -20,5 +20,8 @@ RUN python -m pip install --upgrade pip && \
 COPY src/ ./src/
 COPY model/ ./model/
 
-EXPOSE 8000
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Azure App Service requires container to listen on port 80
+EXPOSE 80
+
+# Start uvicorn on port 80
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "80"]
