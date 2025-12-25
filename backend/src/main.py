@@ -7,6 +7,7 @@ import io
 
 import joblib
 import pandas as pd
+import numpy as np
 from fastapi import FastAPI, HTTPException, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -103,7 +104,7 @@ def score_lof_batched(lof_model, X, batch_size: int = 5000):
     for i in range(0, n, batch_size):
         batch = X[i:i+batch_size]
         scores.append(-lof_model.score_samples(batch))
-    return pd.np.concatenate(scores)
+    return np.concatenate(scores)
 
 # =========================
 # CSV scoring với pagination
