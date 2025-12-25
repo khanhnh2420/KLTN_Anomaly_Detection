@@ -2,11 +2,12 @@
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from contextlib import asynccontextmanager
+import math
 import io
 
 import joblib
 import pandas as pd
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -94,10 +95,25 @@ def score(req: ScoreRequest):
     }
 
 # =========================
-# CSV scoring với kiểm tra cột
+# Batched LOF scoring helper
+# =========================
+def score_lof_batched(lof_model, X, batch_size: int = 5000):
+    scores = []
+    n = X.shape[0]
+    for i in range(0, n, batch_size):
+        batch = X[i:i+batch_size]
+        scores.append(-lof_model.score_samples(batch))
+    return pd.np.concatenate(scores)
+
+# =========================
+# CSV scoring với pagination
 # =========================
 @app.post("/score_csv")
-async def score_csv(file: UploadFile = File(...), top_k: int = 10):
+async def score_csv(
+    file: UploadFile = File(...),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
     content = await file.read()
 
     try:
@@ -105,12 +121,10 @@ async def score_csv(file: UploadFile = File(...), top_k: int = 10):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to read CSV: {e}")
 
-    # =========================
-    # Các cột pipeline yêu cầu
-    # =========================
+    # Cột pipeline yêu cầu
     REQUIRED_COLS = ["PRCTR", "BSCHL", "HKONT", "WAERS", "BUKRS", "KTOSL", "DMBTR", "WRBTR"]
 
-    # Kiểm tra các cột thiếu
+    # Kiểm tra cột thiếu
     missing_cols = set(REQUIRED_COLS) - set(df.columns)
     if missing_cols:
         raise HTTPException(
@@ -118,7 +132,7 @@ async def score_csv(file: UploadFile = File(...), top_k: int = 10):
             detail=f"Missing required columns in CSV: {sorted(list(missing_cols))}"
         )
 
-    # Lấy các cột feature
+    # Lấy cột feature
     df_model = df[REQUIRED_COLS]
 
     # Chuyển các cột numeric
@@ -128,13 +142,37 @@ async def score_csv(file: UploadFile = File(...), top_k: int = 10):
     # Transform + LOF scoring
     try:
         Z = app.state.feature_pipe.transform(df_model)
-        scores = -app.state.lof.score_samples(Z)
+        scores = score_lof_batched(app.state.lof, Z)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Transform/score failed: {e}")
 
     df['anomaly_scored'] = scores.astype(float)
 
-    # Lấy top_k
-    df_return = df.sort_values("anomaly_scored", ascending=False)[["BELNR", "anomaly_scored"]].head(top_k).reset_index(drop=True)
+    # =========================
+    # Pagination
+    # =========================
+    total_rows = len(df)
+    total_pages = max(1, math.ceil(total_rows / page_size))
 
-    return df_return.to_dict(orient="records")
+    if page > total_pages:
+        raise HTTPException(
+            status_code=400,
+            detail=f"page ({page}) exceeds total_pages ({total_pages})",
+        )
+
+    start = (page - 1) * page_size
+    end = page * page_size
+
+    # Lấy top anomaly scores cho tất cả rows, sau đó slice theo page
+    df_top = df.nlargest(end, "anomaly_scored")
+    df_page = df_top.iloc[start:end][["BELNR", "anomaly_scored"]]
+
+    return {
+        "meta": {
+            "page": page,
+            "page_size": page_size,
+            "total_rows": total_rows,
+            "total_pages": total_pages
+        },
+        "data": df_page.to_dict(orient="records")
+    }
