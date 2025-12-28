@@ -5,24 +5,28 @@ const api = axios.create({
   timeout: 120000,
 });
 
-export const scoreCSV = async (
+/**
+ * Score CSV with pagination & optional upload progress
+ */
+export const scoreCSV = async ({
   file,
   page = 1,
   pageSize = 20,
-  onProgress
-) => {
+  percentile = 95,
+  onProgress,
+}) => {
   const formData = new FormData();
   formData.append("file", file);
 
   const res = await api.post(
-    `/score_csv?page=${page}&page_size=${pageSize}`,
+    `/score_csv?page=${page}&page_size=${pageSize}&percentile=${percentile}`,
     formData,
     {
       headers: {
         "Content-Type": "multipart/form-data",
       },
       onUploadProgress: (e) => {
-        if (!onProgress || !e.total) return;
+        if (typeof onProgress !== "function" || !e.total) return;
         onProgress(Math.round((e.loaded * 100) / e.total));
       },
     }

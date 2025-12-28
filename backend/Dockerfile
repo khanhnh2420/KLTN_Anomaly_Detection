@@ -21,7 +21,7 @@ COPY src/ ./src/
 COPY model/ ./model/
 
 # Azure App Service requires container to listen on port 80
-EXPOSE 80
+EXPOSE 8000
 
 # Start uvicorn on port 80
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "80"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

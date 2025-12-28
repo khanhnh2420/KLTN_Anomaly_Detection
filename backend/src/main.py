@@ -18,12 +18,14 @@ from pydantic import BaseModel
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_PATH = ROOT / "model" / "svd_lof.joblib"
 
+
 # =========================
 # Request schema
 # =========================
 class ScoreRequest(BaseModel):
     records: List[Dict[str, Any]]
     top_k: Optional[int] = 10
+
 
 # =========================
 # Lifespan: load model
@@ -42,6 +44,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
+
 # =========================
 # App
 # =========================
@@ -50,7 +53,7 @@ app = FastAPI(title="SVD+LOF Scoring API", version="0.1", lifespan=lifespan)
 # =========================
 # CORS
 # =========================
-origins = ["https://sapanomalydetect.netlify.app"]
+origins = ["https://sapanomalydetect.netlify.app", "http://localhost:3000"]
 
 app.add_middleware(
     CORSMiddleware,
@@ -60,12 +63,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # =========================
 # Health check
 # =========================
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
 
 # =========================
 # JSON scoring
@@ -95,6 +100,7 @@ def score(req: ScoreRequest):
         "top_scores": [float(scores[i]) for i in top_idx],
     }
 
+
 # =========================
 # Batched LOF scoring helper
 # =========================
@@ -102,9 +108,10 @@ def score_lof_batched(lof_model, X, batch_size: int = 5000):
     scores = []
     n = X.shape[0]
     for i in range(0, n, batch_size):
-        batch = X[i:i+batch_size]
+        batch = X[i : i + batch_size]
         scores.append(-lof_model.score_samples(batch))
     return np.concatenate(scores)
+
 
 # =========================
 # CSV scoring với pagination
@@ -114,6 +121,7 @@ async def score_csv(
     file: UploadFile = File(...),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    percentile: float = Query(95, ge=50, le=99.9),
 ):
     content = await file.read()
 
@@ -122,37 +130,54 @@ async def score_csv(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to read CSV: {e}")
 
-    # Cột pipeline yêu cầu
-    REQUIRED_COLS = ["PRCTR", "BSCHL", "HKONT", "WAERS", "BUKRS", "KTOSL", "DMBTR", "WRBTR"]
-
-    # Kiểm tra cột thiếu
+    REQUIRED_COLS = [
+        "PRCTR",
+        "BSCHL",
+        "HKONT",
+        "WAERS",
+        "BUKRS",
+        "KTOSL",
+        "DMBTR",
+        "WRBTR",
+    ]
     missing_cols = set(REQUIRED_COLS) - set(df.columns)
     if missing_cols:
         raise HTTPException(
             status_code=400,
-            detail=f"Missing required columns in CSV: {sorted(list(missing_cols))}"
+            detail=f"Missing required columns in CSV: {sorted(list(missing_cols))}",
         )
 
-    # Lấy cột feature
-    df_model = df[REQUIRED_COLS]
+    df_model = df.loc[:, REQUIRED_COLS].copy()
 
-    # Chuyển các cột numeric
     for col in ["DMBTR", "WRBTR"]:
         df_model[col] = pd.to_numeric(df_model[col], errors="coerce").fillna(0)
 
-    # Transform + LOF scoring
+    # =========================
+    # Feature transform + LOF (GLOBAL)
+    # =========================
     try:
         Z = app.state.feature_pipe.transform(df_model)
         scores = score_lof_batched(app.state.lof, Z)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Transform/score failed: {e}")
 
-    df['anomaly_scored'] = scores.astype(float)
+    df["anomaly_scored"] = scores.astype(float)
+
+    # =========================
+    # GLOBAL threshold
+    # =========================
+    threshold_value = float(np.percentile(scores, percentile))
+    df["is_anomaly"] = (df["anomaly_scored"] >= threshold_value).astype(int)
+
+    # =========================
+    # Sắp xếp theo anomaly score giảm dần
+    # =========================
+    df_sorted = df.sort_values("anomaly_scored", ascending=False).reset_index(drop=True)
 
     # =========================
     # Pagination
     # =========================
-    total_rows = len(df)
+    total_rows = len(df_sorted)
     total_pages = max(1, math.ceil(total_rows / page_size))
 
     if page > total_pages:
@@ -162,18 +187,26 @@ async def score_csv(
         )
 
     start = (page - 1) * page_size
-    end = page * page_size
+    end = start + page_size
 
-    # Lấy top anomaly scores cho tất cả rows, sau đó slice theo page
-    df_top = df.nlargest(end, "anomaly_scored")
-    df_page = df_top.iloc[start:end][["BELNR", "anomaly_scored"]]
+    df_page = df_sorted.iloc[start:end].copy()
+
+    # =========================
+    # Metadata thống kê (GLOBAL)
+    # =========================
+    total_anomalies = int((df["is_anomaly"] == 1).sum())
 
     return {
         "meta": {
             "page": page,
             "page_size": page_size,
             "total_rows": total_rows,
-            "total_pages": total_pages
+            "total_pages": total_pages,
+            "total_anomalies": total_anomalies,
         },
-        "data": df_page.to_dict(orient="records")
+        "threshold": {
+            "value": threshold_value,
+            "percentile": percentile,
+        },
+        "data": df_page.to_dict(orient="records"),
     }
