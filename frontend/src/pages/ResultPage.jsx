@@ -13,8 +13,11 @@ import { DataGrid } from "@mui/x-data-grid";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import { scoreCSV } from "../services/api";
 import LoadingScreen from "../components/LoadingScreen";
+import MetricCard from "../components/MetricCard";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from "recharts";
 import debounce from "lodash.debounce";
+import { Alert, AlertTitle } from "@mui/material";
+
 
 export default function ResultPage({ file, onBack }) {
   /* ===================== STATE ===================== */
@@ -35,10 +38,14 @@ export default function ResultPage({ file, onBack }) {
   const [percentileDraft, setPercentileDraft] = useState(95); // slider
   const [threshold, setThreshold] = useState(null);
 
+  const [error, setError] = useState(null);
+
   /* ===================== FETCH PAGE ===================== */
   const fetchPage = async (page, pageSize, currentPercentile = percentile) => {
     if (!file) return;
     setLoading(true);
+    setError(null);
+
     try {
       const res = await scoreCSV({
         file,
@@ -56,7 +63,6 @@ export default function ResultPage({ file, onBack }) {
       setMeta(res.meta);
       setThreshold(res.threshold?.value ?? null);
 
-      // Build columns dynamically (chỉ 1 lần)
       if (columns.length === 0 && res.data.length > 0) {
         const dynamicCols = Object.keys(res.data[0]).map((key) => {
           if (key === "anomaly_scored") {
@@ -111,6 +117,17 @@ export default function ResultPage({ file, onBack }) {
       const scores = res.data.map((r) => r.anomaly_scored);
       minRef.current = minRef.current === null ? Math.min(...scores) : minRef.current;
       maxRef.current = maxRef.current === null ? Math.max(...scores) : maxRef.current;
+    } catch (err) {
+      console.error(err);
+
+      const message =
+        err?.response?.data?.detail ||
+        err?.message ||
+        "Unexpected error occurred while processing the file.";
+
+      setError(message);
+      setRows([]);
+      setMeta({});
     } finally {
       setLoading(false);
     }
@@ -180,95 +197,206 @@ export default function ResultPage({ file, onBack }) {
           </Button>
         </Stack>
 
+        {error && (
+          <Alert
+            severity="error"
+            sx={{ borderRadius: 2 }}
+            onClose={() => setError(null)}
+          >
+            <AlertTitle>Data Validation Error</AlertTitle>
+            {error}
+          </Alert>
+        )}
+
         {/* KPI */}
-        <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-          <Kpi title="Total Records" value={meta.total_rows ?? 0} />
-          <Kpi title="Detected Anomalies" value={anomalyCount} color="error" />
-          <Kpi
-            title="Threshold"
-            value={`P${percentile}`}
-            subtitle={`Score ≥ ${threshold?.toFixed(4) ?? "—"}`}
-          />
-        </Stack>
-
-        {/* Threshold + Distribution */}
-        <Stack direction={{ xs: "column", md: "row" }} spacing={3}>
-          <Card sx={{ flex: 1 }}>
-            <CardContent>
-              <Typography variant="h6">Anomaly Threshold Configuration</Typography>
-              <Slider
-                value={percentileDraft}
-                min={90}
-                max={99.9}
-                step={0.1}
-                marks={[
-                  { value: 90, label: "P90" },
-                  { value: 95, label: "P95" },
-                  { value: 99, label: "P99" },
-                ]}
-                valueLabelDisplay="auto"
-                onChange={(_, v) => setPercentileDraft(v)}
-                onChangeCommitted={(_, v) => debouncedPercentileChange(v)}
-              />
-            </CardContent>
-          </Card>
-
-          <Card sx={{ flex: 1 }}>
-            <CardContent>
-              <Typography variant="h6">Anomaly Distribution</Typography>
-              <ResponsiveContainer width="100%" height={260}>
-                <PieChart>
-                  <Pie data={pieData} dataKey="value" outerRadius={90} label>
-                    {pieData.map((_, i) => (
-                      <Cell key={i} fill={COLORS[i]} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        </Stack>
-
-        {/* TABLE */}
-        <Card>
-          <CardContent>
-            <DataGrid
-              autoHeight
-              rows={rows}
-              columns={columns}
-              paginationMode="server"
-              rowCount={meta.total_rows ?? 0}
-              paginationModel={paginationModel}
-              onPaginationModelChange={(m) => {
-                setPaginationModel(m);
-                fetchPage(m.page + 1, m.pageSize);
-              }}
-              loading={loading}
-              pageSizeOptions={[20, 50, 100]}
+        {!error && (
+          <Stack
+            direction={{ xs: "column", md: "row" }}
+            spacing={2}
+            alignItems="stretch"
+          >
+            <MetricCard
+              label="TOTAL RECORDS"
+              value={meta.total_rows ?? 0}
+              unit="rows"
+              hint="Input transactions"
             />
-          </CardContent>
-        </Card>
+
+            <MetricCard
+              label="ANOMALY RATE"
+              value={
+                meta.total_rows
+                  ? ((anomalyCount / meta.total_rows) * 100).toFixed(2)
+                  : "0.00"
+              }
+              unit="%"
+              highlight
+              hint={`${anomalyCount} flagged records`}
+            />
+
+            <MetricCard
+              label="DETECTION THRESHOLD"
+              value={`P${percentile}`}
+              hint={
+                threshold !== null
+                  ? `Score ≥ ${threshold.toFixed(4)}`
+                  : "Threshold not available"
+              }
+            />
+          </Stack>
+        )}
+
+        {!error && (
+          <>
+            {/* Threshold + Distribution */}
+            <Stack direction={{ xs: "column", md: "row" }} spacing={3}>
+              <Card sx={{ flex: 1 }}>
+                <CardContent>
+                  <Typography variant="h6">Anomaly Threshold Configuration</Typography>
+                  <Slider
+                    value={percentileDraft}
+                    min={90}
+                    max={99.9}
+                    step={0.1}
+                    marks={[
+                      { value: 90, label: "P90" },
+                      { value: 95, label: "P95" },
+                      { value: 99, label: "P99" },
+                    ]}
+                    valueLabelDisplay="auto"
+                    onChange={(_, v) => setPercentileDraft(v)}
+                    onChangeCommitted={(_, v) => debouncedPercentileChange(v)}
+                  />
+                </CardContent>
+                <CardContent sx={{ pt: 2 }}>
+                  {/* Threshold explanation */}
+                  <Typography
+                    variant="body1"
+                    color="text.secondary"
+                    sx={{ mt: 1.5, lineHeight: 1.6 }}
+                  >
+                    At <b>P{percentileDraft}</b>, approximately{" "}
+                    <b>{((100 - percentileDraft) / 100 * meta.total_rows).toFixed(0)}</b> records
+                    are expected to be flagged as anomalies.
+                  </Typography>
+
+                  <Typography
+                    variant="body1"
+                    color="text.secondary"
+                    sx={{ mb: 1.5 }}
+                  >
+                    Higher percentile means fewer but more extreme anomalies
+                    (lower false positives).
+                  </Typography>
+
+                  {/* === Score Color Explanation === */}
+                  <Box sx={{ mt: 2.5 }}>
+                    <Typography
+                      variant="h6"
+                      fontWeight={700}
+                      gutterBottom
+                    >
+                      Score Color Interpretation
+                    </Typography>
+
+                    <Stack spacing={1.2}>
+                      <Typography variant="body1">
+                        -{" "}
+                        <Box
+                          component="span"
+                          sx={{
+                            fontWeight: 800,
+                            color: "success.main",
+                          }}
+                        >
+                          Green
+                        </Box>
+                        : Transaction behavior is close to the normal pattern
+                        (low anomaly score).
+                      </Typography>
+
+                      <Typography variant="body1">
+                        -{" "}
+                        <Box
+                          component="span"
+                          sx={{
+                            fontWeight: 800,
+                            background: "linear-gradient(90deg, #fbc02d, #fb8c00)",
+                            WebkitBackgroundClip: "text",
+                            WebkitTextFillColor: "transparent",
+                          }}
+                        >
+                          Yellow to Orange
+                        </Box>
+                        : Moderate deviation from normal behavior.
+                      </Typography>
+
+                      <Typography variant="body1">
+                        -{" "}
+                        <Box
+                          component="span"
+                          sx={{
+                            fontWeight: 800,
+                            color: "error.main",
+                          }}
+                        >
+                          Red
+                        </Box>
+                        : Strong deviation indicating high anomaly likelihood.
+                      </Typography>
+
+                      <Typography
+                        variant="body1"
+                        color="text.secondary"
+                        sx={{ mt: 0.5 }}
+                      >
+                        Color intensity is normalized using a logarithmic scale to
+                        reduce the influence of extreme outliers.
+                      </Typography>
+                    </Stack>
+                  </Box>
+                </CardContent>
+              </Card>
+
+              <Card sx={{ flex: 1 }}>
+                <CardContent>
+                  <Typography variant="h6">Anomaly Distribution</Typography>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <PieChart>
+                      <Pie data={pieData} dataKey="value" outerRadius={90} label>
+                        {pieData.map((_, i) => (
+                          <Cell key={i} fill={COLORS[i]} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            </Stack>
+
+            {/* TABLE */}
+            <Card>
+              <CardContent>
+                <DataGrid
+                  autoHeight
+                  rows={rows}
+                  columns={columns}
+                  paginationMode="server"
+                  rowCount={meta.total_rows ?? 0}
+                  paginationModel={paginationModel}
+                  onPaginationModelChange={(m) => {
+                    setPaginationModel(m);
+                    fetchPage(m.page + 1, m.pageSize);
+                  }}
+                  loading={loading}
+                  pageSizeOptions={[20, 50, 100]}
+                />
+              </CardContent>
+            </Card>
+          </>
+        )}
       </Stack>
     </Box>
-  );
-}
-
-/* ===================== SMALL COMPONENT ===================== */
-function Kpi({ title, value, subtitle, color }) {
-  return (
-    <Card sx={{ flex: 1 }}>
-      <CardContent>
-        <Typography variant="overline">{title}</Typography>
-        <Typography variant="h4" fontWeight={700} color={color}>
-          {value}
-        </Typography>
-        {subtitle && (
-          <Typography variant="caption" color="text.secondary">
-            {subtitle}
-          </Typography>
-        )}
-      </CardContent>
-    </Card>
   );
 }

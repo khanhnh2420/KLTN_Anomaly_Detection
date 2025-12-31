@@ -3,6 +3,7 @@
 # dependencies
 frontend/node_modules
 tool
+data
 /.pnp
 .pnp.js
 

@@ -6,8 +6,27 @@ const api = axios.create({
 });
 
 /**
- * Score CSV with pagination & optional upload progress
+ * Extract & normalize FastAPI error.detail
  */
+function extractErrorMessage(error) {
+  if (error.response?.data?.detail) {
+    const detail = error.response.data.detail;
+
+    // FastAPI có thể trả string hoặc list
+    if (Array.isArray(detail)) {
+      return detail.map((d) => d.msg).join(", ");
+    }
+
+    return detail;
+  }
+
+  if (error.request) {
+    return "Cannot connect to backend service";
+  }
+
+  return error.message || "Unknown error occurred";
+}
+
 export const scoreCSV = async ({
   file,
   page = 1,
@@ -18,21 +37,24 @@ export const scoreCSV = async ({
   const formData = new FormData();
   formData.append("file", file);
 
-  const res = await api.post(
-    `/score_csv?page=${page}&page_size=${pageSize}&percentile=${percentile}`,
-    formData,
-    {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
-      onUploadProgress: (e) => {
-        if (typeof onProgress !== "function" || !e.total) return;
-        onProgress(Math.round((e.loaded * 100) / e.total));
-      },
-    }
-  );
+  try {
+    const res = await api.post(
+      `/score_csv?page=${page}&page_size=${pageSize}&percentile=${percentile}`,
+      formData,
+      {
+        headers: { "Content-Type": "multipart/form-data" },
+        onUploadProgress: (e) => {
+          if (!e.total || typeof onProgress !== "function") return;
+          onProgress(Math.round((e.loaded * 100) / e.total));
+        },
+      }
+    );
 
-  return res.data;
+    return res.data;
+  } catch (err) {
+    const message = extractErrorMessage(err);
+    throw new Error(message);
+  }
 };
 
 export default api;

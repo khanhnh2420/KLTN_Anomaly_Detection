@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import {
   Box,
   Card,
@@ -6,22 +6,70 @@ import {
   Button,
   Typography,
   Stack,
-  LinearProgress,
   Alert,
+  LinearProgress,
 } from "@mui/material";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
+
+const MAX_FILE_SIZE_MB = 10;
 
 export default function UploadPage({ onUploaded }) {
   const [file, setFile] = useState(null);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const fileInputRef = useRef(null);
 
-  const handleUpload = () => {
-    if (!file) {
-      setError("Please select a CSV file");
+  const validateFile = (file) => {
+    if (!file) return "Please select a file";
+
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      return "Only CSV files are allowed";
+    }
+
+    if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+      return `File size must be less than ${MAX_FILE_SIZE_MB}MB`;
+    }
+
+    return "";
+  };
+
+  const handleFileChange = (e) => {
+    const selectedFile = e.target.files?.[0];
+    setError("");
+
+    const validationError = validateFile(selectedFile);
+    if (validationError) {
+      setFile(null);
+      setError(validationError);
       return;
     }
-    setError("");
-    onUploaded(file);
+
+    setFile(selectedFile);
+
+    // Cho phép chọn lại cùng 1 file
+    e.target.value = "";
+  };
+
+  const handleUpload = async () => {
+    const validationError = validateFile(file);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError("");
+      await onUploaded(file);
+    } catch (err) {
+      console.error("Upload error:", err);
+      setError(
+        err?.message ||
+          "Failed to upload and score file. Please try again."
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -42,22 +90,34 @@ export default function UploadPage({ onUploaded }) {
               SAP Anomaly Detection
             </Typography>
 
-            {error && <Alert severity="error">{error}</Alert>}
+            {loading && <LinearProgress sx={{ width: "100%" }} />}
 
-            <Button variant="outlined" component="label" fullWidth>
+            {error && (
+              <Alert severity="error" sx={{ width: "100%" }}>
+                {error}
+              </Alert>
+            )}
+
+            <Button
+              variant="outlined"
+              component="label"
+              fullWidth
+              disabled={loading}
+            >
               {file ? file.name : "Select CSV file"}
               <input
+                ref={fileInputRef}
                 hidden
                 type="file"
                 accept=".csv"
-                onChange={(e) => setFile(e.target.files[0])}
+                onChange={handleFileChange}
               />
             </Button>
 
             <Button
               variant="contained"
               fullWidth
-              disabled={!file}
+              disabled={!file || loading}
               onClick={handleUpload}
             >
               Upload & Score
