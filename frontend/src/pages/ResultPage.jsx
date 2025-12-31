@@ -8,6 +8,8 @@ import {
   Stack,
   Chip,
   Slider,
+  Alert,
+  AlertTitle,
 } from "@mui/material";
 import { DataGrid } from "@mui/x-data-grid";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
@@ -16,8 +18,6 @@ import LoadingScreen from "../components/LoadingScreen";
 import MetricCard from "../components/MetricCard";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from "recharts";
 import debounce from "lodash.debounce";
-import { Alert, AlertTitle } from "@mui/material";
-
 
 export default function ResultPage({ file, onBack }) {
   /* ===================== STATE ===================== */
@@ -26,10 +26,7 @@ export default function ResultPage({ file, onBack }) {
   const [meta, setMeta] = useState({});
   const [loading, setLoading] = useState(false);
 
-  const [paginationModel, setPaginationModel] = useState({
-    page: 0,
-    pageSize: 20,
-  });
+  const [paginationModel, setPaginationModel] = useState({ page: 0, pageSize: 20 });
 
   const minRef = useRef(null);
   const maxRef = useRef(null);
@@ -37,7 +34,6 @@ export default function ResultPage({ file, onBack }) {
   const [percentile, setPercentile] = useState(95);
   const [percentileDraft, setPercentileDraft] = useState(95); // slider
   const [threshold, setThreshold] = useState(null);
-
   const [error, setError] = useState(null);
 
   /* ===================== FETCH PAGE ===================== */
@@ -45,24 +41,15 @@ export default function ResultPage({ file, onBack }) {
     if (!file) return;
     setLoading(true);
     setError(null);
-
     try {
-      const res = await scoreCSV({
-        file,
-        page,
-        pageSize,
-        percentile: currentPercentile,
-      });
-
-      const dataWithId = res.data.map((r, i) => ({
-        id: (page - 1) * pageSize + i + 1,
-        ...r,
-      }));
+      const res = await scoreCSV({ file, page, pageSize, percentile: currentPercentile });
+      const dataWithId = res.data.map((r, i) => ({ id: (page - 1) * pageSize + i + 1, ...r }));
 
       setRows(dataWithId);
       setMeta(res.meta);
       setThreshold(res.threshold?.value ?? null);
 
+      // Setup columns dynamically
       if (columns.length === 0 && res.data.length > 0) {
         const dynamicCols = Object.keys(res.data[0]).map((key) => {
           if (key === "anomaly_scored") {
@@ -88,7 +75,6 @@ export default function ResultPage({ file, onBack }) {
               ),
             };
           }
-
           if (key === "is_anomaly") {
             return {
               field: key,
@@ -102,29 +88,18 @@ export default function ResultPage({ file, onBack }) {
                 ),
             };
           }
-
-          return {
-            field: key,
-            headerName: key,
-            flex: 1,
-            minWidth: 120,
-          };
+          return { field: key, headerName: key, flex: 1, minWidth: 120 };
         });
-
         setColumns([{ field: "id", headerName: "#", width: 80 }, ...dynamicCols]);
       }
 
+      // Track min/max for coloring
       const scores = res.data.map((r) => r.anomaly_scored);
       minRef.current = minRef.current === null ? Math.min(...scores) : minRef.current;
       maxRef.current = maxRef.current === null ? Math.max(...scores) : maxRef.current;
     } catch (err) {
       console.error(err);
-
-      const message =
-        err?.response?.data?.detail ||
-        err?.message ||
-        "Unexpected error occurred while processing the file.";
-
+      const message = err?.response?.data?.detail || err?.message || "Unexpected error occurred.";
       setError(message);
       setRows([]);
       setMeta({});
@@ -133,17 +108,17 @@ export default function ResultPage({ file, onBack }) {
     }
   };
 
-  /* ===================== DEBOUNCED PERCENTILE ===================== */
+  /* ===================== DEBOUNCED SLIDER ===================== */
   const debouncedPercentileChange = useCallback(
     debounce((v) => {
       setPercentile(v);
-      setPaginationModel((prev) => ({ ...prev, page: 0 })); // reset page
+      setPaginationModel((prev) => ({ ...prev, page: 0 }));
       fetchPage(1, paginationModel.pageSize, v);
     }, 250),
     [file, paginationModel.pageSize]
   );
 
-  /* ===================== EFFECT ===================== */
+  /* ===================== EFFECT ON FILE ===================== */
   useEffect(() => {
     if (!file) return;
     minRef.current = null;
@@ -153,7 +128,7 @@ export default function ResultPage({ file, onBack }) {
     fetchPage(1, paginationModel.pageSize);
   }, [file]);
 
-  /* ===================== COLOR ===================== */
+  /* ===================== COLOR FUNCTION ===================== */
   const getRowColor = (score) => {
     if (minRef.current === null) return "#fff";
     const s = Math.log(score + 1);
@@ -164,11 +139,8 @@ export default function ResultPage({ file, onBack }) {
     return `hsl(${120 * (1 - t)}, 85%, 50%)`;
   };
 
-  /* ===================== DERIVED ===================== */
-  const anomalyCount = useMemo(
-    () => rows.filter((r) => r.is_anomaly === 1).length,
-    [rows]
-  );
+  /* ===================== DERIVED METRICS ===================== */
+  const anomalyCount = useMemo(() => rows.filter((r) => r.is_anomaly === 1).length, [rows]);
 
   const pieData = [
     { name: "Anomaly", value: anomalyCount },
@@ -176,6 +148,24 @@ export default function ResultPage({ file, onBack }) {
   ];
 
   const COLORS = ["#f44336", "#4caf50"];
+
+  const pageAnomalyRate = rows.length > 0 ? (anomalyCount / rows.length) * 100 : 0;
+
+  // Donut center: page-level risk
+  const riskLevel =
+    anomalyCount === 0
+      ? "None"
+      : pageAnomalyRate < 3
+        ? "Low"
+        : pageAnomalyRate < 10
+          ? "Medium"
+          : "High";
+
+  // Global anomaly rate for KPI
+  const globalAnomalyRate =
+    meta.total_rows && meta.total_anomalies
+      ? (meta.total_anomalies / meta.total_rows) * 100
+      : null;
 
   /* ===================== UI ===================== */
   return (
@@ -188,33 +178,22 @@ export default function ResultPage({ file, onBack }) {
           <Typography variant="h4" fontWeight={700}>
             Detection Result
           </Typography>
-          <Button
-            startIcon={<UploadFileIcon />}
-            variant="outlined"
-            onClick={onBack}
-          >
+          <Button startIcon={<UploadFileIcon />} variant="outlined" onClick={onBack}>
             Upload new file
           </Button>
         </Stack>
 
+        {/* Error */}
         {error && (
-          <Alert
-            severity="error"
-            sx={{ borderRadius: 2 }}
-            onClose={() => setError(null)}
-          >
+          <Alert severity="error" sx={{ borderRadius: 2 }} onClose={() => setError(null)}>
             <AlertTitle>Data Validation Error</AlertTitle>
             {error}
           </Alert>
         )}
 
-        {/* KPI */}
+        {/* KPI - GLOBAL METRICS */}
         {!error && (
-          <Stack
-            direction={{ xs: "column", md: "row" }}
-            spacing={2}
-            alignItems="stretch"
-          >
+          <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="stretch">
             <MetricCard
               label="TOTAL RECORDS"
               value={meta.total_rows ?? 0}
@@ -226,17 +205,17 @@ export default function ResultPage({ file, onBack }) {
               label="ANOMALY RATE"
               value={
                 meta.total_rows
-                  ? ((anomalyCount / meta.total_rows) * 100).toFixed(2)
+                  ? ((100 - percentileDraft).toFixed(1)) // tính top percentile
                   : "0.00"
               }
               unit="%"
               highlight
-              hint={`${anomalyCount} flagged records`}
+              hint={`${Math.ceil((100 - percentileDraft) / 100 * meta.total_rows)} flagged records`}
             />
 
             <MetricCard
               label="DETECTION THRESHOLD"
-              value={`P${percentile}`}
+              value={`P${percentileDraft}`}
               hint={
                 threshold !== null
                   ? `Score ≥ ${threshold.toFixed(4)}`
@@ -248,8 +227,9 @@ export default function ResultPage({ file, onBack }) {
 
         {!error && (
           <>
-            {/* Threshold + Distribution */}
+            {/* Threshold Slider + Donut */}
             <Stack direction={{ xs: "column", md: "row" }} spacing={3}>
+              {/* Slider & Color Explanation */}
               <Card sx={{ flex: 1 }}>
                 <CardContent>
                   <Typography variant="h6">Anomaly Threshold Configuration</Typography>
@@ -269,55 +249,26 @@ export default function ResultPage({ file, onBack }) {
                   />
                 </CardContent>
                 <CardContent sx={{ pt: 2 }}>
-                  {/* Threshold explanation */}
-                  <Typography
-                    variant="body1"
-                    color="text.secondary"
-                    sx={{ mt: 1.5, lineHeight: 1.6 }}
-                  >
+                  <Typography variant="body1" color="text.secondary" sx={{ mt: 1.5, lineHeight: 1.6 }}>
                     At <b>P{percentileDraft}</b>, approximately{" "}
                     <b>{((100 - percentileDraft) / 100 * meta.total_rows).toFixed(0)}</b> records
                     are expected to be flagged as anomalies.
                   </Typography>
-
-                  <Typography
-                    variant="body1"
-                    color="text.secondary"
-                    sx={{ mb: 1.5 }}
-                  >
-                    Higher percentile means fewer but more extreme anomalies
-                    (lower false positives).
+                  <Typography variant="body1" color="text.secondary" sx={{ mb: 1.5 }}>
+                    Higher percentile means fewer but more extreme anomalies (lower false positives).
                   </Typography>
 
-                  {/* === Score Color Explanation === */}
+                  {/* Score Color Explanation */}
                   <Box sx={{ mt: 2.5 }}>
-                    <Typography
-                      variant="h6"
-                      fontWeight={700}
-                      gutterBottom
-                    >
+                    <Typography variant="h6" fontWeight={700} gutterBottom>
                       Score Color Interpretation
                     </Typography>
-
                     <Stack spacing={1.2}>
                       <Typography variant="body1">
-                        -{" "}
-                        <Box
-                          component="span"
-                          sx={{
-                            fontWeight: 800,
-                            color: "success.main",
-                          }}
-                        >
-                          Green
-                        </Box>
-                        : Transaction behavior is close to the normal pattern
-                        (low anomaly score).
+                        - <Box component="span" sx={{ fontWeight: 800, color: "success.main" }}>Green</Box>: Transaction behavior is close to the normal pattern (low anomaly score).
                       </Typography>
-
                       <Typography variant="body1">
-                        -{" "}
-                        <Box
+                        - <Box
                           component="span"
                           sx={{
                             fontWeight: 800,
@@ -327,55 +278,51 @@ export default function ResultPage({ file, onBack }) {
                           }}
                         >
                           Yellow to Orange
-                        </Box>
-                        : Moderate deviation from normal behavior.
+                        </Box>: Moderate deviation from normal behavior.
                       </Typography>
-
                       <Typography variant="body1">
-                        -{" "}
-                        <Box
-                          component="span"
-                          sx={{
-                            fontWeight: 800,
-                            color: "error.main",
-                          }}
-                        >
-                          Red
-                        </Box>
-                        : Strong deviation indicating high anomaly likelihood.
-                      </Typography>
-
-                      <Typography
-                        variant="body1"
-                        color="text.secondary"
-                        sx={{ mt: 0.5 }}
-                      >
-                        Color intensity is normalized using a logarithmic scale to
-                        reduce the influence of extreme outliers.
+                        - <Box component="span" sx={{ fontWeight: 800, color: "error.main" }}>Red</Box>: Strong deviation indicating high anomaly likelihood.
                       </Typography>
                     </Stack>
                   </Box>
                 </CardContent>
               </Card>
 
+              {/* Donut: Page-Level Anomaly Distribution */}
               <Card sx={{ flex: 1 }}>
                 <CardContent>
-                  <Typography variant="h6">Anomaly Distribution</Typography>
-                  <ResponsiveContainer width="100%" height={260}>
+                  <Typography variant="h6">Anomaly Distribution (Current Page)</Typography>
+                  <ResponsiveContainer width="100%" height={240}>
                     <PieChart>
-                      <Pie data={pieData} dataKey="value" outerRadius={90} label>
+                      <Pie data={pieData} dataKey="value" innerRadius={60} outerRadius={90} paddingAngle={2}>
                         {pieData.map((_, i) => (
                           <Cell key={i} fill={COLORS[i]} />
                         ))}
                       </Pie>
+
+                      {/* Center Risk Level */}
+                      <text x="50%" y="46%" textAnchor="middle" dominantBaseline="middle" style={{ fontSize: 20, fontWeight: 800 }}>
+                        {riskLevel}
+                      </text>
+                      <text x="50%" y="60%" textAnchor="middle" dominantBaseline="middle" style={{ fontSize: 11 }}>
+                        Risk Level
+                      </text>
                       <Tooltip />
                     </PieChart>
                   </ResponsiveContainer>
+
+                  {/* Page-level description */}
+                  <Typography variant="body2" align="center" sx={{ mt: 1.5 }}>
+                    {riskLevel === "High" && <>High concentration of anomalies detected on this page.</>}
+                    {riskLevel === "Medium" && <>Some abnormal patterns detected, review recommended.</>}
+                    {riskLevel === "Low" && <>Mostly normal transactions with minor deviations.</>}
+                    {riskLevel === "None" && <>No anomalous transactions detected on this page.</>}
+                  </Typography>
                 </CardContent>
               </Card>
             </Stack>
 
-            {/* TABLE */}
+            {/* Data Table */}
             <Card>
               <CardContent>
                 <DataGrid
