@@ -251,7 +251,7 @@ export default function ResultPage({ file, onBack }) {
                 <CardContent sx={{ pt: 2 }}>
                   <Typography variant="body1" color="text.secondary" sx={{ mt: 1.5, lineHeight: 1.6 }}>
                     At <b>P{percentileDraft}</b>, approximately{" "}
-                    <b>{((100 - percentileDraft) / 100 * meta.total_rows).toFixed(0)}</b> records
+                    <b>{Math.ceil((100 - percentileDraft) / 100 * meta.total_rows)}</b> records
                     are expected to be flagged as anomalies.
                   </Typography>
                   <Typography variant="body1" color="text.secondary" sx={{ mb: 1.5 }}>
@@ -272,7 +272,7 @@ export default function ResultPage({ file, onBack }) {
                           component="span"
                           sx={{
                             fontWeight: 800,
-                            background: "linear-gradient(90deg, #fbc02d, #fb8c00)",
+                            background: "linear-gradient(90deg, #fbc02d, #c36b00ff)",
                             WebkitBackgroundClip: "text",
                             WebkitTextFillColor: "transparent",
                           }}
