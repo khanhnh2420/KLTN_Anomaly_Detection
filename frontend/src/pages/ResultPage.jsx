@@ -19,6 +19,11 @@ import MetricCard from "../components/MetricCard";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from "recharts";
 import debounce from "lodash.debounce";
 
+const formatWithComma = (v) => {
+  if (v === null || v === undefined || isNaN(v)) return "-";
+  return v.toLocaleString("en-US", { useGrouping: true });
+};
+
 export default function ResultPage({ file, onBack }) {
   /* ===================== STATE ===================== */
   const [rows, setRows] = useState([]);
@@ -52,6 +57,15 @@ export default function ResultPage({ file, onBack }) {
       // Setup columns dynamically
       if (columns.length === 0 && res.data.length > 0) {
         const dynamicCols = Object.keys(res.data[0]).map((key) => {
+          if (key === "DMBTR" || key === "WRBTR") {
+            return {
+              field: key,
+              headerName: key,
+              flex: 1,
+              renderCell: (p) => formatWithComma(p.value),
+            };
+          }
+
           if (key === "anomaly_scored") {
             return {
               field: key,
@@ -70,7 +84,7 @@ export default function ResultPage({ file, onBack }) {
                     bgcolor: getRowColor(p.value),
                   }}
                 >
-                  {p.value.toFixed(4)}
+                  {formatWithComma(p.value)}
                 </Box>
               ),
             };
@@ -218,7 +232,7 @@ export default function ResultPage({ file, onBack }) {
               value={`P${percentileDraft}`}
               hint={
                 threshold !== null
-                  ? `Score ≥ ${threshold.toFixed(4)}`
+                  ? `Score ≥ ${formatWithComma(threshold)}`
                   : "Threshold not available"
               }
             />

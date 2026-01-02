@@ -2,6 +2,6 @@ fastapi
 joblib
 numpy
 pandas
-scikit-learn==1.6.1
+scikit-learn==1.7.1
 uvicorn[standard]
 python-multipart

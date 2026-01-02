@@ -33,14 +33,15 @@ class ScoreRequest(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import __main__
-    from src.custom_transformers import DropColumns, log_eps  # noqa: F401
+    from src.custom_transformers import DropColumns, log_eps
 
     setattr(__main__, "DropColumns", DropColumns)
     setattr(__main__, "log_eps", log_eps)
 
     bundle = joblib.load(MODEL_PATH)
-    app.state.feature_pipe = bundle["feature_pipe"]
-    app.state.lof = bundle["lof"]
+
+    app.state.pipe = bundle
+    print("[MODEL] Loaded Pipeline steps:", [name for name, _ in bundle.steps])
 
     yield
 
@@ -48,7 +49,7 @@ async def lifespan(app: FastAPI):
 # =========================
 # App
 # =========================
-app = FastAPI(title="SVD+LOF Scoring API", version="0.1", lifespan=lifespan)
+app = FastAPI(title="LOF Scoring API", version="0.1", lifespan=lifespan)
 
 # =========================
 # CORS
@@ -73,47 +74,6 @@ def health():
 
 
 # =========================
-# JSON scoring
-# =========================
-@app.post("/score")
-def score(req: ScoreRequest):
-    if not req.records:
-        raise HTTPException(status_code=400, detail="records is empty")
-
-    df = pd.DataFrame(req.records)
-
-    try:
-        Z = app.state.feature_pipe.transform(df)
-        scores = -app.state.lof.score_samples(Z)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Transform/score failed: {e}")
-
-    s = pd.Series(scores)
-    idx = s.sort_values(ascending=False).index.tolist()
-    k = min(req.top_k or 10, len(idx))
-    top_idx = idx[:k]
-
-    return {
-        "n": len(scores),
-        "top_k": k,
-        "top_index": top_idx,
-        "top_scores": [float(scores[i]) for i in top_idx],
-    }
-
-
-# =========================
-# Batched LOF scoring helper
-# =========================
-def score_lof_batched(lof_model, X, batch_size: int = 5000):
-    scores = []
-    n = X.shape[0]
-    for i in range(0, n, batch_size):
-        batch = X[i : i + batch_size]
-        scores.append(-lof_model.score_samples(batch))
-    return np.concatenate(scores)
-
-
-# =========================
 # CSV scoring với pagination
 # =========================
 @app.post("/score_csv")
@@ -130,6 +90,9 @@ async def score_csv(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to read CSV: {e}")
 
+    # =========================
+    # Required columns
+    # =========================
     REQUIRED_COLS = [
         "PRCTR",
         "BSCHL",
@@ -147,19 +110,22 @@ async def score_csv(
             detail=f"Missing required columns in CSV: {sorted(list(missing_cols))}",
         )
 
-    df_model = df.loc[:, REQUIRED_COLS].copy()
-
-    for col in ["DMBTR", "WRBTR"]:
-        df_model[col] = pd.to_numeric(df_model[col], errors="coerce").fillna(0)
+    # =========================
+    # Numeric coercion
+    # =========================
+    for c in ["DMBTR", "WRBTR"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
 
     # =========================
-    # Feature transform + LOF (GLOBAL)
+    # Anomaly scoring (PIPELINE)
     # =========================
     try:
-        Z = app.state.feature_pipe.transform(df_model)
-        scores = score_lof_batched(app.state.lof, Z)
+        scores = -app.state.pipe.score_samples(df)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Transform/score failed: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Scoring failed: {e}",
+        )
 
     df["anomaly_scored"] = scores.astype(float)
 
@@ -170,7 +136,7 @@ async def score_csv(
     df["is_anomaly"] = (df["anomaly_scored"] >= threshold_value).astype(int)
 
     # =========================
-    # Sắp xếp theo anomaly score giảm dần
+    # Sort DESC by anomaly score
     # =========================
     df_sorted = df.sort_values("anomaly_scored", ascending=False).reset_index(drop=True)
 
@@ -188,13 +154,12 @@ async def score_csv(
 
     start = (page - 1) * page_size
     end = start + page_size
-
     df_page = df_sorted.iloc[start:end].copy()
 
     # =========================
-    # Metadata thống kê (GLOBAL)
+    # Metadata
     # =========================
-    total_anomalies = int((df["is_anomaly"] == 1).sum())
+    total_anomalies = int(df["is_anomaly"].sum())
 
     return {
         "meta": {
