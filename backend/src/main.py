@@ -1,4 +1,3 @@
-# src/main.py
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from contextlib import asynccontextmanager
@@ -88,7 +87,10 @@ async def score_csv(
     try:
         df = pd.read_csv(io.BytesIO(content))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to read CSV: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "CSV_READ_FAILED", "message": f"Failed to read CSV: {e}"},
+        )
 
     # =========================
     # Required columns
@@ -107,7 +109,11 @@ async def score_csv(
     if missing_cols:
         raise HTTPException(
             status_code=400,
-            detail=f"Missing required columns in CSV: {sorted(list(missing_cols))}",
+            detail={
+                "code": "MISSING_COLUMNS",
+                "message": "Missing required columns in CSV",
+                "columns": sorted(list(missing_cols)),
+            },
         )
 
     # =========================
@@ -123,8 +129,8 @@ async def score_csv(
         scores = -app.state.pipe.score_samples(df)
     except Exception as e:
         raise HTTPException(
-            status_code=400,
-            detail=f"Scoring failed: {e}",
+            status_code=500,
+            detail={"code": "SCORING_FAILED", "message": f"Model scoring failed: {e}"},
         )
 
     df["anomaly_scored"] = scores.astype(float)

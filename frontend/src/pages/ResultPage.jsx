@@ -17,6 +17,8 @@ import { scoreCSV } from "../services/api";
 import LoadingScreen from "../components/LoadingScreen";
 import MetricCard from "../components/MetricCard";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from "recharts";
+import ErrorState from "../components/ErrorState";
+import { errorFormatter } from "../utils/errorFormatter";
 import debounce from "lodash.debounce";
 
 const formatWithComma = (v) => {
@@ -113,11 +115,11 @@ export default function ResultPage({ file, onBack }) {
       maxRef.current = maxRef.current === null ? Math.max(...scores) : maxRef.current;
     } catch (err) {
       console.error(err);
-      const message = err?.response?.data?.detail || err?.message || "Unexpected error occurred.";
-      setError(message);
+      setError(errorFormatter(err));
       setRows([]);
       setMeta({});
-    } finally {
+    }
+    finally {
       setLoading(false);
     }
   };
@@ -197,12 +199,13 @@ export default function ResultPage({ file, onBack }) {
           </Button>
         </Stack>
 
-        {/* Error */}
         {error && (
-          <Alert severity="error" sx={{ borderRadius: 2 }} onClose={() => setError(null)}>
-            <AlertTitle>Data Validation Error</AlertTitle>
-            {error}
-          </Alert>
+          <ErrorState
+            error={error}
+            onRetry={() =>
+              fetchPage(paginationModel.page + 1, paginationModel.pageSize)
+            }
+          />
         )}
 
         {/* KPI - GLOBAL METRICS */}

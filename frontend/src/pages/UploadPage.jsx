@@ -13,7 +13,7 @@ import {
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import Papa from "papaparse";
 
-const MAX_FILE_SIZE_MB = 10;
+const MAX_FILE_SIZE_MB = 20;
 const REQUIRED_COLS = ["PRCTR","BSCHL","HKONT","WAERS","BUKRS","KTOSL","DMBTR","WRBTR"];
 
 export default function UploadPageAdvanced({ onUploaded }) {

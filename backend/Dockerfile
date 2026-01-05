@@ -20,8 +20,8 @@ RUN python -m pip install --upgrade pip && \
 COPY src/ ./src/
 COPY model/ ./model/
 
-# Azure App Service requires container to listen on port 80
+# App Service listen on port 8000
 EXPOSE 8000
 
-# Start uvicorn on port 80
+# Start uvicorn on port 8000
 CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
