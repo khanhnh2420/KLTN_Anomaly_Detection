@@ -80,7 +80,6 @@ async def score_csv(
     file: UploadFile = File(...),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    percentile: float = Query(95, ge=50, le=99.9),
 ):
     content = await file.read()
 
@@ -133,18 +132,12 @@ async def score_csv(
             detail={"code": "SCORING_FAILED", "message": f"Model scoring failed: {e}"},
         )
 
-    df["anomaly_scored"] = scores.astype(float)
-
-    # =========================
-    # GLOBAL threshold
-    # =========================
-    threshold_value = float(np.percentile(scores, percentile))
-    df["is_anomaly"] = (df["anomaly_scored"] >= threshold_value).astype(int)
+    df["anomaly_score"] = scores.astype(float)
 
     # =========================
     # Sort DESC by anomaly score
     # =========================
-    df_sorted = df.sort_values("anomaly_scored", ascending=False).reset_index(drop=True)
+    df_sorted = df.sort_values("anomaly_score", ascending=False).reset_index(drop=True)
 
     # =========================
     # Pagination
@@ -163,21 +156,14 @@ async def score_csv(
     df_page = df_sorted.iloc[start:end].copy()
 
     # =========================
-    # Metadata
+    # Response
     # =========================
-    total_anomalies = int(df["is_anomaly"].sum())
-
     return {
         "meta": {
             "page": page,
             "page_size": page_size,
             "total_rows": total_rows,
             "total_pages": total_pages,
-            "total_anomalies": total_anomalies,
-        },
-        "threshold": {
-            "value": threshold_value,
-            "percentile": percentile,
         },
         "data": df_page.to_dict(orient="records"),
     }

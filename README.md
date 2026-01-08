@@ -207,8 +207,8 @@ Lê Quang Huy – Undergraduate Student, IT
 
 **Supervisor**
 
-**Dr. Nguyễn Văn A**  
-Faculty of Computer Science and Engineering  
+**Dr. Nguyễn Tấn Cầm**  
+
 University of Information Technology – VNU-HCM
 
 ---

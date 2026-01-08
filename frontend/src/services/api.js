@@ -31,7 +31,6 @@ export const scoreCSV = async ({
   file,
   page = 1,
   pageSize = 20,
-  percentile = 95,
   onProgress,
 }) => {
   const formData = new FormData();
@@ -39,7 +38,7 @@ export const scoreCSV = async ({
 
   try {
     const res = await api.post(
-      `/score_csv?page=${page}&page_size=${pageSize}&percentile=${percentile}`,
+      `/score_csv?page=${page}&page_size=${pageSize}`,
       formData,
       {
         headers: { "Content-Type": "multipart/form-data" },
