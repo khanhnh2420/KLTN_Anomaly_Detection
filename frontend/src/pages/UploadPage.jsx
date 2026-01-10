@@ -14,7 +14,7 @@ import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import Papa from "papaparse";
 
 const MAX_FILE_SIZE_MB = 20;
-const REQUIRED_COLS = ["PRCTR","BSCHL","HKONT","WAERS","BUKRS","KTOSL","DMBTR","WRBTR"];
+const REQUIRED_COLS = ["PRCTR", "BSCHL", "HKONT", "WAERS", "BUKRS", "KTOSL", "DMBTR", "WRBTR"];
 
 export default function UploadPageAdvanced({ onUploaded }) {
   const [file, setFile] = useState(null);
@@ -89,6 +89,7 @@ export default function UploadPageAdvanced({ onUploaded }) {
       setError(validationError);
       return;
     }
+
     if (missingCols.length > 0) {
       setError(`Cannot upload. Missing columns: ${missingCols.join(", ")}`);
       return;
@@ -99,21 +100,23 @@ export default function UploadPageAdvanced({ onUploaded }) {
       setError("");
       setUploadProgress(0);
 
-      // Animation for progress
+      /* fake progress animation (UX only) */
       const interval = setInterval(() => {
-        setUploadProgress((p) => Math.min(100, p + Math.random() * 20));
+        setUploadProgress((p) => Math.min(95, p + Math.random() * 15));
       }, 200);
 
-      await onUploaded(file);
+      onUploaded(file);
 
       clearInterval(interval);
       setUploadProgress(100);
     } catch (err) {
       console.error(err);
-      setError(err?.message || "Failed to upload and score file. Please try again.");
+      setError("Failed to prepare file. Please try again.");
     } finally {
-      setLoading(false);
-      setTimeout(() => setUploadProgress(0), 400);
+      setTimeout(() => {
+        setLoading(false);
+        setUploadProgress(0);
+      }, 400);
     }
   };
 

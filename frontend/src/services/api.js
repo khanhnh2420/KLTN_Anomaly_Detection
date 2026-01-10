@@ -5,34 +5,13 @@ const api = axios.create({
   timeout: 120000,
 });
 
-/**
- * Extract & normalize FastAPI error.detail
- */
-function extractErrorMessage(error) {
-  if (error.response?.data?.detail) {
-    const detail = error.response.data.detail;
+const extractErrorMessage = (error) => {
+  if (error.response?.data?.detail) return error.response.data.detail;
+  if (error.request) return "Cannot connect to backend";
+  return error.message;
+};
 
-    // FastAPI có thể trả string hoặc list
-    if (Array.isArray(detail)) {
-      return detail.map((d) => d.msg).join(", ");
-    }
-
-    return detail;
-  }
-
-  if (error.request) {
-    return "Cannot connect to backend service";
-  }
-
-  return error.message || "Unknown error occurred";
-}
-
-export const scoreCSV = async ({
-  file,
-  page = 1,
-  pageSize = 20,
-  onProgress,
-}) => {
+export const scoreCSV = async ({ file, page, pageSize }) => {
   const formData = new FormData();
   formData.append("file", file);
 
@@ -40,20 +19,23 @@ export const scoreCSV = async ({
     const res = await api.post(
       `/score_csv?page=${page}&page_size=${pageSize}`,
       formData,
-      {
-        headers: { "Content-Type": "multipart/form-data" },
-        onUploadProgress: (e) => {
-          if (!e.total || typeof onProgress !== "function") return;
-          onProgress(Math.round((e.loaded * 100) / e.total));
-        },
-      }
+      { headers: { "Content-Type": "multipart/form-data" } }
     );
-
     return res.data;
-  } catch (err) {
-    const message = extractErrorMessage(err);
-    throw new Error(message);
+  } catch (e) {
+    throw new Error(extractErrorMessage(e));
   }
+};
+
+export const downloadScoreCSV = async ({ file }) => {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await api.post("/score_csv_download", formData, {
+    responseType: "blob",
+  });
+
+  return res.data;
 };
 
 export default api;

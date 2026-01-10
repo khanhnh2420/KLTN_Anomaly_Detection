@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 from fastapi import FastAPI, HTTPException, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 # =========================
@@ -167,3 +168,56 @@ async def score_csv(
         },
         "data": df_page.to_dict(orient="records"),
     }
+
+
+@app.post("/score_csv_download")
+async def score_csv_download(file: UploadFile = File(...)):
+    content = await file.read()
+
+    try:
+        df = pd.read_csv(io.BytesIO(content))
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "CSV_READ_FAILED", "message": str(e)},
+        )
+
+    # ===== Required columns =====
+    REQUIRED_COLS = [
+        "PRCTR",
+        "BSCHL",
+        "HKONT",
+        "WAERS",
+        "BUKRS",
+        "KTOSL",
+        "DMBTR",
+        "WRBTR",
+    ]
+    missing_cols = set(REQUIRED_COLS) - set(df.columns)
+    if missing_cols:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "MISSING_COLUMNS", "columns": list(missing_cols)},
+        )
+
+    # ===== Numeric coercion =====
+    for c in ["DMBTR", "WRBTR"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
+
+    # ===== Scoring =====
+    scores = -app.state.pipe.score_samples(df)
+    df["anomaly_score"] = scores.astype(float)
+
+    # ===== Sort DESC =====
+    df_sorted = df.sort_values("anomaly_score", ascending=False).reset_index(drop=True)
+
+    # ===== Export CSV =====
+    buffer = io.StringIO()
+    df_sorted.to_csv(buffer, index=False)
+    buffer.seek(0)
+
+    return StreamingResponse(
+        buffer,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=anomaly_scored.csv"},
+    )

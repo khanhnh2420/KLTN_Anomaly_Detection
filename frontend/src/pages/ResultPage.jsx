@@ -14,6 +14,9 @@ import LoadingScreen from "../components/LoadingScreen";
 import MetricCard from "../components/MetricCard";
 import ErrorState from "../components/ErrorState";
 import { errorFormatter } from "../utils/errorFormatter";
+import DownloadIcon from "@mui/icons-material/Download";
+import { downloadScoreCSV } from "../services/api";
+
 
 const formatWithComma = (v) => {
   if (v === null || v === undefined || isNaN(v)) return "-";
@@ -82,13 +85,35 @@ export default function ResultPage({ file, onBack }) {
           };
         });
 
-        setColumns([{ field: "id", headerName: "Rank", width: 90 }, ...dynamicCols]);
+        setColumns([{ field: "id", headerName: "#", width: 90 }, ...dynamicCols]);
       }
 
     } catch (err) {
       setError(errorFormatter(err));
       setRows([]);
       setMeta({});
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!file) return;
+
+    try {
+      setLoading(true);
+      const blob = await downloadScoreCSV({ file });
+
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "anomaly_scored.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(errorFormatter(err));
     } finally {
       setLoading(false);
     }
@@ -109,18 +134,36 @@ export default function ResultPage({ file, onBack }) {
 
       <Stack spacing={3}>
         {/* Header */}
-        <Stack direction="row" justifyContent="space-between">
+        {/* Header */}
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          justifyContent="space-between"
+          alignItems={{ xs: "flex-start", sm: "center" }}
+          spacing={2}
+        >
           <Typography variant="h4" fontWeight={700}>
             Anomaly Detection Results
           </Typography>
-          <Button
-            startIcon={<UploadFileIcon />}
-            variant="outlined"
-            onClick={onBack}
-          >
-            Upload new file
-          </Button>
+
+          <Stack direction="row" spacing={1}>
+            <Button
+              startIcon={<DownloadIcon />}
+              variant="contained"
+              onClick={handleDownload}
+            >
+              Download CSV
+            </Button>
+
+            <Button
+              startIcon={<UploadFileIcon />}
+              variant="outlined"
+              onClick={onBack}
+            >
+              Upload new file
+            </Button>
+          </Stack>
         </Stack>
+
 
         {/* Context explanation */}
         <Typography variant="body2" color="text.secondary">
